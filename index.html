@@ -124,14 +124,33 @@
             </div>
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse">
-                    <thead>
-                        <tr class="bg-gray-100 text-xs uppercase text-gray-600">
-                            <th class="p-4 font-semibold">Producto</th>
-                            <th class="p-4 font-semibold">Categoría</th>
-                            <th class="p-4 font-semibold text-center">Inv. Total (Entradas)</th>
-                            <th class="p-4 font-semibold text-center">Salidas</th>
-                            <th class="p-4 font-semibold text-center">Última Salida</th>
-                            <th class="p-4 font-semibold text-center">Existencia Real</th>
+                    <thead class="bg-gray-100 border-b border-gray-200 text-sm text-gray-600">
+                        <tr>
+                            <th class="p-4 text-left cursor-pointer hover:bg-gray-200 transition select-none group"
+                                onclick="window.cambiarOrden('nombre')">
+                                PRODUCTO <i id="sort-icon-nombre" class="fas fa-sort ml-1 text-gray-400 group-hover:text-gray-600"></i>
+                            </th>
+                            <th class="p-4 text-left">CATEGORÍA</th>
+                            <th class="p-4 text-center cursor-pointer hover:bg-gray-200 transition select-none group"
+                                onclick="window.cambiarOrden('entradasTotales')">
+                                INV. TOTAL (ENTRADAS) <i id="sort-icon-entradasTotales"
+                                    class="fas fa-sort ml-1 text-gray-400 group-hover:text-gray-600"></i>
+                            </th>
+                            <th class="p-4 text-center cursor-pointer hover:bg-gray-200 transition select-none group"
+                                onclick="window.cambiarOrden('salidasTotales')">
+                                SALIDAS <i id="sort-icon-salidasTotales"
+                                    class="fas fa-sort ml-1 text-gray-400 group-hover:text-gray-600"></i>
+                            </th>
+                            <th class="p-4 text-center cursor-pointer hover:bg-gray-200 transition select-none group"
+                                onclick="window.cambiarOrden('ultimaSalidaTimestamp')">
+                                ÚLTIMA SALIDA <i id="sort-icon-ultimaSalidaTimestamp"
+                                    class="fas fa-sort ml-1 text-gray-400 group-hover:text-gray-600"></i>
+                            </th>
+                            <th class="p-4 text-center cursor-pointer hover:bg-gray-200 transition select-none group"
+                                onclick="window.cambiarOrden('existencia')">
+                                EXISTENCIA REAL <i id="sort-icon-existencia"
+                                    class="fas fa-sort ml-1 text-gray-400 group-hover:text-gray-600"></i>
+                            </th>
                             <th class="p-4 font-semibold text-center">Acción</th>
                         </tr>
                     </thead>
@@ -643,7 +662,11 @@
             });
         }
 
-        // 3.2 Dibuja la tabla filtrando la memoria local (Cero costo en Firebase)
+        // Variables globales para controlar el ordenamiento
+        let currentSortColumn = 'nombre';
+        let currentSortDirection = 'asc'; // 'asc' o 'desc'
+
+        // 3.2 Dibuja la tabla filtrando y ordenando la memoria local
         function renderizarTabla() {
             const tbody = document.getElementById('tabla-cuerpo');
             tbody.innerHTML = '';
@@ -651,27 +674,18 @@
             const esVistaGlobal = currentCentro === 'Vista Global';
             const esMiCentro = userData.rol === 'master' || (userData.rol === 'normal' && currentCentro === userData.centroAsignado);
             
-            // Lógica de Botones Superiores
+            // --- Lógica de Botones Superiores ---
             if (esVistaGlobal) {
                 document.getElementById('btn-traspaso').classList.add('hidden');
                 document.getElementById('btn-historial-traspasos').classList.add('hidden');
-
-                // En la Vista Global masiva, por orden, solo el Master ve el botón de crear
-                if (userData.rol === 'master') {
-                    document.getElementById('btn-add-product').classList.remove('hidden');
-                } else {
-                    document.getElementById('btn-add-product').classList.add('hidden');
-                }
+                if (userData.rol === 'master') document.getElementById('btn-add-product').classList.remove('hidden');
+                else document.getElementById('btn-add-product').classList.add('hidden');
             } else {
                 if (isAdmin && esMiCentro) {
                     document.getElementById('btn-traspaso').classList.remove('hidden');
                     document.getElementById('btn-historial-traspasos').classList.remove('hidden');
-
-                    // ¡EL CAMBIO ESTÁ AQUÍ! 
-                    // Si el usuario (sea Master o Normal) está viendo su propio salón asignado, SE HABILITA el botón.
                     document.getElementById('btn-add-product').classList.remove('hidden');
                 } else {
-                    // Si está husmeando en el salón de otro, se bloquea todo
                     document.getElementById('btn-traspaso').classList.add('hidden');
                     document.getElementById('btn-historial-traspasos').classList.add('hidden');
                     document.getElementById('btn-add-product').classList.add('hidden');
@@ -680,78 +694,144 @@
 
             if (window.productosActuales.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-gray-500">El catálogo está vacío.</td></tr>`;
+                actualizarIconosOrden();
                 return;
             }
 
             const searchTerm = document.getElementById('input-buscar').value.toLowerCase();
 
-            window.productosActuales.forEach((data) => {
-                // Filtros 100% locales
-                if (currentCategoria !== "Todos" && data.categoria !== currentCategoria) return;
-                if (searchTerm && !data.nombre.toLowerCase().includes(searchTerm)) return;
-
-                let entradasTotales = 0; let salidasTotales = 0; let fechaSalida = "---";
+            // PASO A: Preparar los datos matemáticos antes de ordenar
+            let listaProcesada = window.productosActuales.map(data => {
+                let entradasTotales = 0; let salidasTotales = 0; 
+                let ultimaSalidaTimestamp = 0; let fechaSalidaTexto = "---";
 
                 if (esVistaGlobal) {
                     if (data.stock) {
                         Object.values(data.stock).forEach(s => {
                             entradasTotales += s.entradas || 0;
                             salidasTotales += s.salidas || 0;
+                            // En global, buscamos la salida más reciente de todos los salones
+                            if(s.ultimaSalida && s.ultimaSalida.toMillis() > ultimaSalidaTimestamp) {
+                                ultimaSalidaTimestamp = s.ultimaSalida.toMillis();
+                            }
                         });
+                    }
+                    if (ultimaSalidaTimestamp > 0) {
+                        fechaSalidaTexto = new Date(ultimaSalidaTimestamp).toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' });
                     }
                 } else {
                     const miStock = (data.stock || {})[currentCentro] || { entradas: 0, salidas: 0, ultimaSalida: null };
                     entradasTotales = miStock.entradas || 0;
                     salidasTotales = miStock.salidas || 0;
                     if (miStock.ultimaSalida) {
-                        fechaSalida = miStock.ultimaSalida.toDate().toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' });
+                        ultimaSalidaTimestamp = miStock.ultimaSalida.toMillis();
+                        fechaSalidaTexto = miStock.ultimaSalida.toDate().toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' });
                     } else {
-                        fechaSalida = "Sin salidas";
+                        fechaSalidaTexto = "Sin salidas";
                     }
                 }
                 const existencia = entradasTotales - salidasTotales;
 
-                let botonesAccion = `<div class="flex justify-center gap-3">`;
+                // Retornamos un nuevo objeto con las matemáticas resueltas para poder ordenarlas
+                return { ...data, entradasTotales, salidasTotales, ultimaSalidaTimestamp, fechaSalidaTexto, existencia };
+            });
 
-                if (esVistaGlobal) {
-                    botonesAccion += `<button onclick="window.verDistribucionGlobal('${data.id}', '${data.nombre}')" class="text-blue-600 hover:text-blue-800 transition" title="Ver qué salones tienen stock"><i class="fas fa-sitemap text-lg"></i></button>`;
-                    if (userData.rol === 'master') {
-                        botonesAccion += `<button onclick="window.eliminarProducto('${data.id}', '${data.nombre}')" class="text-gray-400 hover:text-red-600 transition" title="Borrar Producto Definitivamente"><i class="fas fa-trash text-lg"></i></button>`;
+            // PASO B: Aplicar filtros de Búsqueda y Categoría
+            listaProcesada = listaProcesada.filter(data => {
+                if (currentCategoria !== "Todos" && data.categoria !== currentCategoria) return false;
+                if (searchTerm && !data.nombre.toLowerCase().includes(searchTerm)) return false;
+                return true;
+            });
+
+            // PASO C: Ordenar dinámicamente
+            listaProcesada.sort((a, b) => {
+                let valorA = a[currentSortColumn];
+                let valorB = b[currentSortColumn];
+
+                if (typeof valorA === 'string') valorA = valorA.toLowerCase();
+                if (typeof valorB === 'string') valorB = valorB.toLowerCase();
+
+                if (valorA < valorB) return currentSortDirection === 'asc' ? -1 : 1;
+                if (valorA > valorB) return currentSortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
+
+            // PASO D: Dibujar las filas en pantalla
+            if (listaProcesada.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-gray-500">No hay coincidencias.</td></tr>`;
+            } else {
+                listaProcesada.forEach((data) => {
+                    let botonesAccion = `<div class="flex justify-center gap-3">`;
+
+                    if (esVistaGlobal) {
+                        botonesAccion += `<button onclick="window.verDistribucionGlobal('${data.id}', '${data.nombre}')" class="text-blue-600 hover:text-blue-800 transition" title="Ver qué salones tienen stock"><i class="fas fa-sitemap text-lg"></i></button>`;
+                        if (userData.rol === 'master') {
+                            botonesAccion += `<button onclick="window.eliminarProducto('${data.id}', '${data.nombre}')" class="text-gray-400 hover:text-red-600 transition" title="Borrar Producto Definitivamente"><i class="fas fa-trash text-lg"></i></button>`;
+                        }
+                    } else {
+                        if (isAdmin && esMiCentro) {
+                            botonesAccion += `<button onclick="window.abrirModalMovimiento('${data.id}', '${data.nombre}', 'entrada')" class="text-green-500 hover:text-green-700 transition" title="Sumar Entrada"><i class="fas fa-plus-circle text-lg"></i></button>`;
+                            botonesAccion += `<button onclick="window.abrirModalMovimiento('${data.id}', '${data.nombre}', 'salida')" class="text-red-500 hover:text-red-700 transition" title="Registrar Salida"><i class="fas fa-minus-circle text-lg"></i></button>`;
+                        }
+                        if (data.categoria === 'Medicinas e Insumos') {
+                            botonesAccion += `<button onclick="window.abrirModalVencimientos('${data.id}', '${data.nombre}')" class="text-teal-500 hover:text-teal-700 transition" title="Ver Vencimientos"><i class="fas fa-notes-medical text-lg"></i></button>`;
+                        }
+                        botonesAccion += `<button onclick="window.verHistorial('${data.id}', '${data.nombre}')" class="text-blue-500 hover:text-blue-700 transition" title="Ver Historial"><i class="fas fa-list-alt text-lg"></i></button>`;
+                        if (userData.rol === 'master') {
+                            botonesAccion += `<button onclick="window.eliminarProducto('${data.id}', '${data.nombre}')" class="text-gray-400 hover:text-red-600 transition"><i class="fas fa-trash text-lg"></i></button>`;
+                        }
                     }
-                } else {
-                    if (isAdmin && esMiCentro) {
-                        botonesAccion += `<button onclick="window.abrirModalMovimiento('${data.id}', '${data.nombre}', 'entrada')" class="text-green-500 hover:text-green-700 transition" title="Sumar Entrada"><i class="fas fa-plus-circle text-lg"></i></button>`;
-                        botonesAccion += `<button onclick="window.abrirModalMovimiento('${data.id}', '${data.nombre}', 'salida')" class="text-red-500 hover:text-red-700 transition" title="Registrar Salida"><i class="fas fa-minus-circle text-lg"></i></button>`;
-                    }
-                    if (data.categoria === 'Medicinas e Insumos') {
-                        botonesAccion += `<button onclick="window.abrirModalVencimientos('${data.id}', '${data.nombre}')" class="text-teal-500 hover:text-teal-700 transition" title="Ver Vencimientos"><i class="fas fa-notes-medical text-lg"></i></button>`;
-                    }
-                    botonesAccion += `<button onclick="window.verHistorial('${data.id}', '${data.nombre}')" class="text-blue-500 hover:text-blue-700 transition" title="Ver Historial"><i class="fas fa-list-alt text-lg"></i></button>`;
-                    if (userData.rol === 'master') {
-                        botonesAccion += `<button onclick="window.eliminarProducto('${data.id}', '${data.nombre}')" class="text-gray-400 hover:text-red-600 transition"><i class="fas fa-trash text-lg"></i></button>`;
+                    botonesAccion += `</div>`;
+
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-blue-50 transition";
+                    tr.innerHTML = `
+                        <td class="p-4 font-medium text-gray-800">${data.nombre}</td>
+                        <td class="p-4 text-gray-600"><span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">${data.categoria}</span></td>
+                        <td class="p-4 text-center text-gray-700">${data.entradasTotales}</td>
+                        <td class="p-4 text-center text-red-500 font-semibold">${data.salidasTotales}</td>
+                        <td class="p-4 text-center text-gray-500 text-xs">${data.fechaSalidaTexto}</td>
+                        <td class="p-4 text-center font-bold ${data.existencia <= 5 ? 'text-red-600' : 'text-green-600'} text-lg">${data.existencia}</td>
+                        <td class="p-4 text-center">${botonesAccion}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+            actualizarIconosOrden();
+        }
+
+        // 3.3 Función que actualiza el estado al hacer clic en el encabezado
+        window.cambiarOrden = (columna) => {
+            if (currentSortColumn === columna) {
+                // Invertir dirección si se hace clic en la misma columna
+                currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                // Nueva columna seleccionada
+                currentSortColumn = columna;
+                // Experiencia de usuario: Si es nombre, ordenar A-Z. Si son números, ordenar de Mayor a Menor primero.
+                currentSortDirection = (columna === 'nombre') ? 'asc' : 'desc';
+            }
+            renderizarTabla();
+        };
+
+        // 3.4 Actualizar la UI visual de las flechitas
+        function actualizarIconosOrden() {
+            const columnas = ['nombre', 'entradasTotales', 'salidasTotales', 'ultimaSalidaTimestamp', 'existencia'];
+            columnas.forEach(col => {
+                const icon = document.getElementById(`sort-icon-${col}`);
+                if (icon) {
+                    if (currentSortColumn === col) {
+                        icon.className = currentSortDirection === 'asc' ? 'fas fa-sort-up text-blue-500 ml-1' : 'fas fa-sort-down text-blue-500 ml-1';
+                    } else {
+                        icon.className = 'fas fa-sort text-gray-300 ml-1 group-hover:text-gray-500 transition';
                     }
                 }
-                botonesAccion += `</div>`;
-
-                const tr = document.createElement('tr');
-                tr.className = "hover:bg-blue-50 transition";
-                tr.innerHTML = `
-                    <td class="p-4 font-medium text-gray-800">${data.nombre}</td>
-                    <td class="p-4 text-gray-600"><span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">${data.categoria}</span></td>
-                    <td class="p-4 text-center text-gray-700">${entradasTotales}</td>
-                    <td class="p-4 text-center text-red-500 font-semibold">${salidasTotales}</td>
-                    <td class="p-4 text-center text-gray-500 text-xs">${fechaSalida}</td>
-                    <td class="p-4 text-center font-bold ${existencia <= 5 ? 'text-red-600' : 'text-green-600'} text-lg">${existencia}</td>
-                    <td class="p-4 text-center">${botonesAccion}</td>
-                `;
-                tbody.appendChild(tr);
             });
         }
 
-        // 3.3 Event Listeners actualizados
+        // 3.5 Event Listeners
         document.getElementById('select-centro').addEventListener('change', (e) => { currentCentro = e.target.value; renderizarTabla(); });
         document.getElementById('select-categoria').addEventListener('change', (e) => { currentCategoria = e.target.value; renderizarTabla(); });
-        // ¡La clave está aquí! Ahora el teclado solo dispara la función local, no llama a Firebase.
         document.getElementById('input-buscar').addEventListener('keyup', renderizarTabla);
 
         // ==========================================
