@@ -471,6 +471,26 @@
         </div>
     </div>
 
+    <div id="modal-distribucion" class="hidden fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+        <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md max-h-[80vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                <h2 class="text-xl font-bold text-blue-800"><i class="fas fa-globe-americas mr-2"></i> Disponibilidad en el
+                    País</h2>
+                <button id="btn-close-distribucion" class="text-gray-500 hover:text-red-500 transition"><i
+                        class="fas fa-times text-xl"></i></button>
+            </div>
+    
+            <p id="dist-producto-nombre"
+                class="text-sm font-semibold text-gray-700 mb-4 bg-blue-50 p-2 rounded uppercase text-center"></p>
+    
+            <label class="block text-xs font-bold text-gray-600 mb-2 uppercase">Salones con existencias</label>
+            <div class="overflow-y-auto max-h-60 border rounded bg-white shadow-inner">
+                <ul id="lista-distribucion-cuerpo" class="divide-y divide-gray-100 text-sm">
+                </ul>
+            </div>
+        </div>
+    </div>
+
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
@@ -503,6 +523,7 @@
         // ==========================================
         onAuthStateChanged(auth, async (user) => {
             if (user) {
+                // Buscamos el perfil del usuario directamente en Firestore (Seguridad máxima)
                 const qUser = query(collection(db, "usuarios"), where("email", "==", user.email));
                 const userDocs = await getDocs(qUser);
                 
@@ -521,15 +542,19 @@
                 document.getElementById('drop-user-name').innerText = nombreMostrar;
                 document.getElementById('drop-user-email').innerText = user.email;
                 
+                // Lógica de Vistas Predeterminadas según el Rol
                 if (userData.rol === 'master') {
                     document.getElementById('nav-user-role').innerText = 'Usuario Master';
                     document.getElementById('menu-master-options').classList.remove('hidden');
+                    currentCentro = 'Vista Global'; // Master va al global por defecto
                 } else if (userData.rol === 'normal') {
                     document.getElementById('nav-user-role').innerText = `Asignado: ${userData.centroAsignado}`;
                     document.getElementById('menu-master-options').classList.add('hidden');
+                    currentCentro = userData.centroAsignado; // Asignado va a su salón por defecto
                 } else {
                     document.getElementById('nav-user-role').innerText = 'Sin permisos (Solo lectura)';
                     document.getElementById('menu-master-options').classList.add('hidden');
+                    currentCentro = 'Vista Global'; // Visitante va al global por defecto
                 }
             } else {
                 isAdmin = false;
@@ -537,7 +562,15 @@
                 document.getElementById('btn-login-modal').classList.remove('hidden');
                 document.getElementById('btn-user-menu').classList.add('hidden');
                 document.getElementById('dropdown-menu').classList.add('hidden');
+                currentCentro = 'Vista Global'; // No logueado va al global por defecto
             }
+
+            // Sincronizar el selector visual de la página con la decisión que tomó el sistema
+            const selectCentro = document.getElementById('select-centro');
+            if (selectCentro && [...selectCentro.options].some(o => o.value === currentCentro)) {
+                selectCentro.value = currentCentro;
+            }
+
             if (typeof cargarDatos === 'function') cargarDatos();
         });
 
@@ -588,13 +621,10 @@
         // ==========================================
         // 3. LECTURA DEL CATÁLOGO GLOBAL DE PRODUCTOS
         // ==========================================
-        let unsubscribeInventario = null; // Variable para evitar duplicar escuchas de datos
+        let unsubscribeInventario = null;
 
         function cargarDatos() {
-            // Cancelar la escucha anterior si existe
             if (unsubscribeInventario) unsubscribeInventario();
-
-            // Leemos todo el catálogo global
             const q = query(collection(db, "inventario"));
 
             unsubscribeInventario = onSnapshot(q, (snapshot) => {
@@ -602,86 +632,99 @@
                 tbody.innerHTML = '';
                 window.productosActuales = []; 
 
-                // 1. Mostrar u ocultar botones PRIMERO (Antes de revisar si hay productos)
+                const esVistaGlobal = currentCentro === 'Vista Global';
                 const esMiCentro = userData.rol === 'master' || (userData.rol === 'normal' && currentCentro === userData.centroAsignado);
                 
-                if (isAdmin && esMiCentro) {
-                    document.querySelectorAll('.admin-col').forEach(el => el.classList.remove('hidden'));
+                // --- Lógica de Botones Superiores ---
+                if (esVistaGlobal) {
+                    document.getElementById('btn-traspaso').classList.add('hidden');
+                    document.getElementById('btn-historial-traspasos').classList.add('hidden');
+                    if (userData.rol === 'master') document.getElementById('btn-add-product').classList.remove('hidden');
+                    else document.getElementById('btn-add-product').classList.add('hidden');
                 } else {
-                    document.querySelectorAll('.admin-col').forEach(el => el.classList.add('hidden'));
+                    if (isAdmin && esMiCentro) {
+                        document.getElementById('btn-traspaso').classList.remove('hidden');
+                        document.getElementById('btn-historial-traspasos').classList.remove('hidden');
+                        if (userData.rol === 'master') document.getElementById('btn-add-product').classList.remove('hidden');
+                        else document.getElementById('btn-add-product').classList.add('hidden');
+                    } else {
+                        document.getElementById('btn-traspaso').classList.add('hidden');
+                        document.getElementById('btn-historial-traspasos').classList.add('hidden');
+                        document.getElementById('btn-add-product').classList.add('hidden');
+                    }
                 }
 
-                // 2. Comprobar si la base de datos está vacía
                 if (snapshot.empty) {
-                    tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-gray-500">El catálogo global está vacío. Añade el primer producto para comenzar.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-gray-500">El catálogo está vacío.</td></tr>`;
                     return;
                 }
 
-                // 3. Procesar los productos si los hay (Orden alfabético)
                 let docsOrdenados = [];
                 snapshot.forEach(doc => docsOrdenados.push({ id: doc.id, ...doc.data() }));
                 docsOrdenados.sort((a, b) => a.nombre.localeCompare(b.nombre));
 
                 docsOrdenados.forEach((data) => {
-                    window.productosActuales.push(data); // Guardamos para búsquedas locales
+                    window.productosActuales.push(data); 
 
                     const searchTerm = document.getElementById('input-buscar').value.toLowerCase();
                     if (currentCategoria !== "Todos" && data.categoria !== currentCategoria) return;
                     if (searchTerm && !data.nombre.toLowerCase().includes(searchTerm)) return;
 
-                    // Extracción del stock específico para el salón en pantalla
-                    const todoElStock = data.stock || {};
-                    const miStock = todoElStock[currentCentro] || { entradas: 0, salidas: 0, ultimaSalida: null };
-                    
-                    const entradasTotales = miStock.entradas || 0;
-                    const salidasTotales = miStock.salidas || 0;
+                    // --- Lógica Matemática Global vs Local ---
+                    let entradasTotales = 0;
+                    let salidasTotales = 0;
+                    let fechaSalida = "---";
+
+                    if (esVistaGlobal) {
+                        if (data.stock) {
+                            Object.values(data.stock).forEach(s => {
+                                entradasTotales += s.entradas || 0;
+                                salidasTotales += s.salidas || 0;
+                            });
+                        }
+                    } else {
+                        const miStock = (data.stock || {})[currentCentro] || { entradas: 0, salidas: 0, ultimaSalida: null };
+                        entradasTotales = miStock.entradas || 0;
+                        salidasTotales = miStock.salidas || 0;
+                        if (miStock.ultimaSalida) {
+                            fechaSalida = miStock.ultimaSalida.toDate().toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' });
+                        } else {
+                            fechaSalida = "Sin salidas";
+                        }
+                    }
                     const existencia = entradasTotales - salidasTotales;
 
-                    let fechaSalida = "Sin salidas";
-                    if (miStock.ultimaSalida) {
-                        const date = miStock.ultimaSalida.toDate();
-                        fechaSalida = date.toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' });
-                    }
-
-                    // Construcción dinámica de botones según el Rol
+                    // --- Lógica de Botones en Filas ---
                     let botonesAccion = `<div class="flex justify-center gap-3">`;
 
-                    // 1. Botones de Escritura (Solo para Admins de este salón)
-                    if (isAdmin && esMiCentro) {
-                        botonesAccion += `
-                            <button onclick="window.abrirModalMovimiento('${data.id}', '${data.nombre}', 'entrada')" class="text-green-500 hover:text-green-700 transition" title="Sumar Entrada"><i class="fas fa-plus-circle text-lg"></i></button>
-                            <button onclick="window.abrirModalMovimiento('${data.id}', '${data.nombre}', 'salida')" class="text-red-500 hover:text-red-700 transition" title="Registrar Salida"><i class="fas fa-minus-circle text-lg"></i></button>
-                        `;
+                    if (esVistaGlobal) {
+                        // Botón de Distribución Global (Azul Terrestre)
+                        botonesAccion += `<button onclick="window.verDistribucionGlobal('${data.id}', '${data.nombre}')" class="text-blue-600 hover:text-blue-800 transition" title="Ver qué salones tienen stock"><i class="fas fa-sitemap text-lg"></i></button>`;
+                        
+                        if (userData.rol === 'master') {
+                            botonesAccion += `<button onclick="window.eliminarProducto('${data.id}', '${data.nombre}')" class="text-gray-400 hover:text-red-600 transition" title="Borrar Producto Definitivamente"><i class="fas fa-trash text-lg"></i></button>`;
+                        }
+                    } else {
+                        // Lógica normal del salón específico
+                        if (isAdmin && esMiCentro) {
+                            botonesAccion += `<button onclick="window.abrirModalMovimiento('${data.id}', '${data.nombre}', 'entrada')" class="text-green-500 hover:text-green-700 transition" title="Sumar Entrada"><i class="fas fa-plus-circle text-lg"></i></button>`;
+                            botonesAccion += `<button onclick="window.abrirModalMovimiento('${data.id}', '${data.nombre}', 'salida')" class="text-red-500 hover:text-red-700 transition" title="Registrar Salida"><i class="fas fa-minus-circle text-lg"></i></button>`;
+                        }
+                        if (data.categoria === 'Medicinas e Insumos') {
+                            botonesAccion += `<button onclick="window.abrirModalVencimientos('${data.id}', '${data.nombre}')" class="text-teal-500 hover:text-teal-700 transition" title="Ver Vencimientos"><i class="fas fa-notes-medical text-lg"></i></button>`;
+                        }
+                        botonesAccion += `<button onclick="window.verHistorial('${data.id}', '${data.nombre}')" class="text-blue-500 hover:text-blue-700 transition" title="Ver Historial"><i class="fas fa-list-alt text-lg"></i></button>`;
+                        if (userData.rol === 'master') {
+                            botonesAccion += `<button onclick="window.eliminarProducto('${data.id}', '${data.nombre}')" class="text-gray-400 hover:text-red-600 transition"><i class="fas fa-trash text-lg"></i></button>`;
+                        }
                     }
-
-                    // 2. Botón de Vencimientos (Visible para TODOS, solo si es Medicina)
-                    if (data.categoria === 'Medicinas e Insumos') {
-                        botonesAccion += `
-                            <button onclick="window.abrirModalVencimientos('${data.id}', '${data.nombre}')" class="text-teal-500 hover:text-teal-700 transition" title="Ver Vencimientos"><i class="fas fa-notes-medical text-lg"></i></button>
-                        `;
-                    }
-
-                    // 3. Botón de Historial (Visible para TODOS)
-                    botonesAccion += `
-                        <button onclick="window.verHistorial('${data.id}', '${data.nombre}')" class="text-blue-500 hover:text-blue-700 transition" title="Ver Historial"><i class="fas fa-list-alt text-lg"></i></button>
-                    `;
-
-                    // 4. Botón de Eliminar (Solo Master)
-                    if (userData.rol === 'master') {
-                        botonesAccion += `
-                            <button onclick="window.eliminarProducto('${data.id}', '${data.nombre}')" class="text-gray-400 hover:text-red-600 transition" title="Borrar Producto del Catálogo Global"><i class="fas fa-trash text-lg"></i></button>
-                        `;
-                    }
-
                     botonesAccion += `</div>`;
 
                     const tr = document.createElement('tr');
                     tr.className = "hover:bg-blue-50 transition";
                     tr.innerHTML = `
                         <td class="p-4 font-medium text-gray-800">${data.nombre}</td>
-                        <td class="p-4 text-gray-600">
-                            <span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">${data.categoria}</span>
-                        </td>
+                        <td class="p-4 text-gray-600"><span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">${data.categoria}</span></td>
                         <td class="p-4 text-center text-gray-700">${entradasTotales}</td>
                         <td class="p-4 text-center text-red-500 font-semibold">${salidasTotales}</td>
                         <td class="p-4 text-center text-gray-500 text-xs">${fechaSalida}</td>
@@ -1257,9 +1300,8 @@
             } else {
                 const selectCentro = document.getElementById('select-centro');
                 const adminUserCentros = document.getElementById('admin-user-centros-options');
-                const valActual = selectCentro.value;
                 
-                selectCentro.innerHTML = '';
+                selectCentro.innerHTML = '<option value="Vista Global" class="font-bold text-blue-600">Vista Global (Todos los Centros)</option>';
                 if(adminUserCentros) adminUserCentros.innerHTML = '';
 
                 let centrosOrdenados = [];
@@ -1271,12 +1313,15 @@
                     if(adminUserCentros) adminUserCentros.innerHTML += `<option value="normal|${c.nombre}">${c.nombre}</option>`;
                 });
 
-                if(valActual && [...selectCentro.options].some(o => o.value === valActual)) {
-                    selectCentro.value = valActual;
+                // Mantener el centro seleccionado incluso después de crear o borrar uno
+                if ([...selectCentro.options].some(o => o.value === currentCentro)) {
+                    selectCentro.value = currentCentro;
                 } else {
-                    currentCentro = selectCentro.value;
-                    if (typeof cargarDatos === 'function') cargarDatos();
+                    currentCentro = 'Vista Global';
+                    selectCentro.value = currentCentro;
                 }
+                
+                if (typeof cargarDatos === 'function') cargarDatos();
             }
         });
 
@@ -1372,6 +1417,49 @@
         };
 
         window.eliminarCentroDoc = async (idDocumento) => { if(confirm("Solo borrará el centro de la lista de opciones. ¿Deseas continuar?")) { await deleteDoc(doc(db, "centros", idDocumento)); cargarAdminCentros(); } };
+
+        // ==========================================
+        // 12. DISTRIBUCIÓN GLOBAL
+        // ==========================================
+        const modalDistribucion = document.getElementById('modal-distribucion');
+        
+        document.getElementById('btn-close-distribucion').addEventListener('click', () => {
+            modalDistribucion.classList.add('hidden');
+        });
+
+        window.verDistribucionGlobal = (idProducto, nombreProducto) => {
+            const producto = window.productosActuales.find(p => p.id === idProducto);
+            document.getElementById('dist-producto-nombre').innerText = nombreProducto;
+            
+            const ul = document.getElementById('lista-distribucion-cuerpo');
+            ul.innerHTML = '';
+
+            const stock = producto.stock || {};
+            let hayDisponibilidad = false;
+
+            // Ordenar los salones alfabéticamente
+            const centros = Object.keys(stock).sort();
+
+            centros.forEach(centro => {
+                const existencia = (stock[centro].entradas || 0) - (stock[centro].salidas || 0);
+                
+                if (existencia > 0) {
+                    hayDisponibilidad = true;
+                    ul.innerHTML += `
+                        <li class="p-3 flex justify-between items-center hover:bg-gray-50">
+                            <span class="font-medium text-gray-700"><i class="fas fa-map-marker-alt text-blue-400 mr-2"></i> ${centro}</span>
+                            <span class="font-bold text-green-700 bg-green-100 border border-green-200 px-3 py-1 rounded">Disponibles: ${existencia}</span>
+                        </li>
+                    `;
+                }
+            });
+
+            if (!hayDisponibilidad) {
+                ul.innerHTML = '<li class="p-6 text-center text-gray-500 italic"><i class="fas fa-box-open text-2xl mb-2 text-gray-300 block"></i> No hay stock disponible en ningún salón actualmente.</li>';
+            }
+
+            modalDistribucion.classList.remove('hidden');
+        };
 
         // Inicializar
         cargarDatos();
