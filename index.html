@@ -494,7 +494,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
-        import { getFirestore, collection, getDocs, addDoc, doc, setDoc, updateDoc, query, where, onSnapshot, runTransaction, serverTimestamp, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+        import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, getDocs, addDoc, doc, setDoc, query, where, onSnapshot, runTransaction, serverTimestamp, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
         // ==========================================
         // 1. CONFIGURACIÓN
@@ -510,7 +510,9 @@
 
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
-        const db = getFirestore(app);
+        const db = initializeFirestore(app, {
+            localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
+        });
 
         // Variables de estado
         let isAdmin = false;
@@ -653,15 +655,23 @@
             if (esVistaGlobal) {
                 document.getElementById('btn-traspaso').classList.add('hidden');
                 document.getElementById('btn-historial-traspasos').classList.add('hidden');
-                if (userData.rol === 'master') document.getElementById('btn-add-product').classList.remove('hidden');
-                else document.getElementById('btn-add-product').classList.add('hidden');
+
+                // En la Vista Global masiva, por orden, solo el Master ve el botón de crear
+                if (userData.rol === 'master') {
+                    document.getElementById('btn-add-product').classList.remove('hidden');
+                } else {
+                    document.getElementById('btn-add-product').classList.add('hidden');
+                }
             } else {
                 if (isAdmin && esMiCentro) {
                     document.getElementById('btn-traspaso').classList.remove('hidden');
                     document.getElementById('btn-historial-traspasos').classList.remove('hidden');
-                    if (userData.rol === 'master') document.getElementById('btn-add-product').classList.remove('hidden');
-                    else document.getElementById('btn-add-product').classList.add('hidden');
+
+                    // ¡EL CAMBIO ESTÁ AQUÍ! 
+                    // Si el usuario (sea Master o Normal) está viendo su propio salón asignado, SE HABILITA el botón.
+                    document.getElementById('btn-add-product').classList.remove('hidden');
                 } else {
+                    // Si está husmeando en el salón de otro, se bloquea todo
                     document.getElementById('btn-traspaso').classList.add('hidden');
                     document.getElementById('btn-historial-traspasos').classList.add('hidden');
                     document.getElementById('btn-add-product').classList.add('hidden');
