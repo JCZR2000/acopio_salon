@@ -623,122 +623,126 @@
         // ==========================================
         let unsubscribeInventario = null;
 
+        // 3.1 Escucha de Firebase (Solo descarga datos cuando hay cambios reales en la BD)
         function cargarDatos() {
             if (unsubscribeInventario) unsubscribeInventario();
             const q = query(collection(db, "inventario"));
 
             unsubscribeInventario = onSnapshot(q, (snapshot) => {
-                const tbody = document.getElementById('tabla-cuerpo');
-                tbody.innerHTML = '';
                 window.productosActuales = []; 
-
-                const esVistaGlobal = currentCentro === 'Vista Global';
-                const esMiCentro = userData.rol === 'master' || (userData.rol === 'normal' && currentCentro === userData.centroAsignado);
-                
-                // --- Lógica de Botones Superiores ---
-                if (esVistaGlobal) {
-                    document.getElementById('btn-traspaso').classList.add('hidden');
-                    document.getElementById('btn-historial-traspasos').classList.add('hidden');
-                    if (userData.rol === 'master') document.getElementById('btn-add-product').classList.remove('hidden');
-                    else document.getElementById('btn-add-product').classList.add('hidden');
-                } else {
-                    if (isAdmin && esMiCentro) {
-                        document.getElementById('btn-traspaso').classList.remove('hidden');
-                        document.getElementById('btn-historial-traspasos').classList.remove('hidden');
-                        if (userData.rol === 'master') document.getElementById('btn-add-product').classList.remove('hidden');
-                        else document.getElementById('btn-add-product').classList.add('hidden');
-                    } else {
-                        document.getElementById('btn-traspaso').classList.add('hidden');
-                        document.getElementById('btn-historial-traspasos').classList.add('hidden');
-                        document.getElementById('btn-add-product').classList.add('hidden');
-                    }
+                if (!snapshot.empty) {
+                    let docsOrdenados = [];
+                    snapshot.forEach(doc => docsOrdenados.push({ id: doc.id, ...doc.data() }));
+                    docsOrdenados.sort((a, b) => a.nombre.localeCompare(b.nombre));
+                    window.productosActuales = docsOrdenados;
                 }
-
-                if (snapshot.empty) {
-                    tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-gray-500">El catálogo está vacío.</td></tr>`;
-                    return;
-                }
-
-                let docsOrdenados = [];
-                snapshot.forEach(doc => docsOrdenados.push({ id: doc.id, ...doc.data() }));
-                docsOrdenados.sort((a, b) => a.nombre.localeCompare(b.nombre));
-
-                docsOrdenados.forEach((data) => {
-                    window.productosActuales.push(data); 
-
-                    const searchTerm = document.getElementById('input-buscar').value.toLowerCase();
-                    if (currentCategoria !== "Todos" && data.categoria !== currentCategoria) return;
-                    if (searchTerm && !data.nombre.toLowerCase().includes(searchTerm)) return;
-
-                    // --- Lógica Matemática Global vs Local ---
-                    let entradasTotales = 0;
-                    let salidasTotales = 0;
-                    let fechaSalida = "---";
-
-                    if (esVistaGlobal) {
-                        if (data.stock) {
-                            Object.values(data.stock).forEach(s => {
-                                entradasTotales += s.entradas || 0;
-                                salidasTotales += s.salidas || 0;
-                            });
-                        }
-                    } else {
-                        const miStock = (data.stock || {})[currentCentro] || { entradas: 0, salidas: 0, ultimaSalida: null };
-                        entradasTotales = miStock.entradas || 0;
-                        salidasTotales = miStock.salidas || 0;
-                        if (miStock.ultimaSalida) {
-                            fechaSalida = miStock.ultimaSalida.toDate().toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' });
-                        } else {
-                            fechaSalida = "Sin salidas";
-                        }
-                    }
-                    const existencia = entradasTotales - salidasTotales;
-
-                    // --- Lógica de Botones en Filas ---
-                    let botonesAccion = `<div class="flex justify-center gap-3">`;
-
-                    if (esVistaGlobal) {
-                        // Botón de Distribución Global (Azul Terrestre)
-                        botonesAccion += `<button onclick="window.verDistribucionGlobal('${data.id}', '${data.nombre}')" class="text-blue-600 hover:text-blue-800 transition" title="Ver qué salones tienen stock"><i class="fas fa-sitemap text-lg"></i></button>`;
-                        
-                        if (userData.rol === 'master') {
-                            botonesAccion += `<button onclick="window.eliminarProducto('${data.id}', '${data.nombre}')" class="text-gray-400 hover:text-red-600 transition" title="Borrar Producto Definitivamente"><i class="fas fa-trash text-lg"></i></button>`;
-                        }
-                    } else {
-                        // Lógica normal del salón específico
-                        if (isAdmin && esMiCentro) {
-                            botonesAccion += `<button onclick="window.abrirModalMovimiento('${data.id}', '${data.nombre}', 'entrada')" class="text-green-500 hover:text-green-700 transition" title="Sumar Entrada"><i class="fas fa-plus-circle text-lg"></i></button>`;
-                            botonesAccion += `<button onclick="window.abrirModalMovimiento('${data.id}', '${data.nombre}', 'salida')" class="text-red-500 hover:text-red-700 transition" title="Registrar Salida"><i class="fas fa-minus-circle text-lg"></i></button>`;
-                        }
-                        if (data.categoria === 'Medicinas e Insumos') {
-                            botonesAccion += `<button onclick="window.abrirModalVencimientos('${data.id}', '${data.nombre}')" class="text-teal-500 hover:text-teal-700 transition" title="Ver Vencimientos"><i class="fas fa-notes-medical text-lg"></i></button>`;
-                        }
-                        botonesAccion += `<button onclick="window.verHistorial('${data.id}', '${data.nombre}')" class="text-blue-500 hover:text-blue-700 transition" title="Ver Historial"><i class="fas fa-list-alt text-lg"></i></button>`;
-                        if (userData.rol === 'master') {
-                            botonesAccion += `<button onclick="window.eliminarProducto('${data.id}', '${data.nombre}')" class="text-gray-400 hover:text-red-600 transition"><i class="fas fa-trash text-lg"></i></button>`;
-                        }
-                    }
-                    botonesAccion += `</div>`;
-
-                    const tr = document.createElement('tr');
-                    tr.className = "hover:bg-blue-50 transition";
-                    tr.innerHTML = `
-                        <td class="p-4 font-medium text-gray-800">${data.nombre}</td>
-                        <td class="p-4 text-gray-600"><span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">${data.categoria}</span></td>
-                        <td class="p-4 text-center text-gray-700">${entradasTotales}</td>
-                        <td class="p-4 text-center text-red-500 font-semibold">${salidasTotales}</td>
-                        <td class="p-4 text-center text-gray-500 text-xs">${fechaSalida}</td>
-                        <td class="p-4 text-center font-bold ${existencia <= 5 ? 'text-red-600' : 'text-green-600'} text-lg">${existencia}</td>
-                        <td class="p-4 text-center">${botonesAccion}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
+                // Una vez guardados en memoria, llamamos a la función que dibuja la tabla
+                renderizarTabla();
             });
         }
 
-        document.getElementById('select-centro').addEventListener('change', (e) => { currentCentro = e.target.value; cargarDatos(); });
-        document.getElementById('select-categoria').addEventListener('change', (e) => { currentCategoria = e.target.value; cargarDatos(); });
-        document.getElementById('input-buscar').addEventListener('keyup', cargarDatos);
+        // 3.2 Dibuja la tabla filtrando la memoria local (Cero costo en Firebase)
+        function renderizarTabla() {
+            const tbody = document.getElementById('tabla-cuerpo');
+            tbody.innerHTML = '';
+
+            const esVistaGlobal = currentCentro === 'Vista Global';
+            const esMiCentro = userData.rol === 'master' || (userData.rol === 'normal' && currentCentro === userData.centroAsignado);
+            
+            // Lógica de Botones Superiores
+            if (esVistaGlobal) {
+                document.getElementById('btn-traspaso').classList.add('hidden');
+                document.getElementById('btn-historial-traspasos').classList.add('hidden');
+                if (userData.rol === 'master') document.getElementById('btn-add-product').classList.remove('hidden');
+                else document.getElementById('btn-add-product').classList.add('hidden');
+            } else {
+                if (isAdmin && esMiCentro) {
+                    document.getElementById('btn-traspaso').classList.remove('hidden');
+                    document.getElementById('btn-historial-traspasos').classList.remove('hidden');
+                    if (userData.rol === 'master') document.getElementById('btn-add-product').classList.remove('hidden');
+                    else document.getElementById('btn-add-product').classList.add('hidden');
+                } else {
+                    document.getElementById('btn-traspaso').classList.add('hidden');
+                    document.getElementById('btn-historial-traspasos').classList.add('hidden');
+                    document.getElementById('btn-add-product').classList.add('hidden');
+                }
+            }
+
+            if (window.productosActuales.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-gray-500">El catálogo está vacío.</td></tr>`;
+                return;
+            }
+
+            const searchTerm = document.getElementById('input-buscar').value.toLowerCase();
+
+            window.productosActuales.forEach((data) => {
+                // Filtros 100% locales
+                if (currentCategoria !== "Todos" && data.categoria !== currentCategoria) return;
+                if (searchTerm && !data.nombre.toLowerCase().includes(searchTerm)) return;
+
+                let entradasTotales = 0; let salidasTotales = 0; let fechaSalida = "---";
+
+                if (esVistaGlobal) {
+                    if (data.stock) {
+                        Object.values(data.stock).forEach(s => {
+                            entradasTotales += s.entradas || 0;
+                            salidasTotales += s.salidas || 0;
+                        });
+                    }
+                } else {
+                    const miStock = (data.stock || {})[currentCentro] || { entradas: 0, salidas: 0, ultimaSalida: null };
+                    entradasTotales = miStock.entradas || 0;
+                    salidasTotales = miStock.salidas || 0;
+                    if (miStock.ultimaSalida) {
+                        fechaSalida = miStock.ultimaSalida.toDate().toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' });
+                    } else {
+                        fechaSalida = "Sin salidas";
+                    }
+                }
+                const existencia = entradasTotales - salidasTotales;
+
+                let botonesAccion = `<div class="flex justify-center gap-3">`;
+
+                if (esVistaGlobal) {
+                    botonesAccion += `<button onclick="window.verDistribucionGlobal('${data.id}', '${data.nombre}')" class="text-blue-600 hover:text-blue-800 transition" title="Ver qué salones tienen stock"><i class="fas fa-sitemap text-lg"></i></button>`;
+                    if (userData.rol === 'master') {
+                        botonesAccion += `<button onclick="window.eliminarProducto('${data.id}', '${data.nombre}')" class="text-gray-400 hover:text-red-600 transition" title="Borrar Producto Definitivamente"><i class="fas fa-trash text-lg"></i></button>`;
+                    }
+                } else {
+                    if (isAdmin && esMiCentro) {
+                        botonesAccion += `<button onclick="window.abrirModalMovimiento('${data.id}', '${data.nombre}', 'entrada')" class="text-green-500 hover:text-green-700 transition" title="Sumar Entrada"><i class="fas fa-plus-circle text-lg"></i></button>`;
+                        botonesAccion += `<button onclick="window.abrirModalMovimiento('${data.id}', '${data.nombre}', 'salida')" class="text-red-500 hover:text-red-700 transition" title="Registrar Salida"><i class="fas fa-minus-circle text-lg"></i></button>`;
+                    }
+                    if (data.categoria === 'Medicinas e Insumos') {
+                        botonesAccion += `<button onclick="window.abrirModalVencimientos('${data.id}', '${data.nombre}')" class="text-teal-500 hover:text-teal-700 transition" title="Ver Vencimientos"><i class="fas fa-notes-medical text-lg"></i></button>`;
+                    }
+                    botonesAccion += `<button onclick="window.verHistorial('${data.id}', '${data.nombre}')" class="text-blue-500 hover:text-blue-700 transition" title="Ver Historial"><i class="fas fa-list-alt text-lg"></i></button>`;
+                    if (userData.rol === 'master') {
+                        botonesAccion += `<button onclick="window.eliminarProducto('${data.id}', '${data.nombre}')" class="text-gray-400 hover:text-red-600 transition"><i class="fas fa-trash text-lg"></i></button>`;
+                    }
+                }
+                botonesAccion += `</div>`;
+
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-blue-50 transition";
+                tr.innerHTML = `
+                    <td class="p-4 font-medium text-gray-800">${data.nombre}</td>
+                    <td class="p-4 text-gray-600"><span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">${data.categoria}</span></td>
+                    <td class="p-4 text-center text-gray-700">${entradasTotales}</td>
+                    <td class="p-4 text-center text-red-500 font-semibold">${salidasTotales}</td>
+                    <td class="p-4 text-center text-gray-500 text-xs">${fechaSalida}</td>
+                    <td class="p-4 text-center font-bold ${existencia <= 5 ? 'text-red-600' : 'text-green-600'} text-lg">${existencia}</td>
+                    <td class="p-4 text-center">${botonesAccion}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 3.3 Event Listeners actualizados
+        document.getElementById('select-centro').addEventListener('change', (e) => { currentCentro = e.target.value; renderizarTabla(); });
+        document.getElementById('select-categoria').addEventListener('change', (e) => { currentCategoria = e.target.value; renderizarTabla(); });
+        // ¡La clave está aquí! Ahora el teclado solo dispara la función local, no llama a Firebase.
+        document.getElementById('input-buscar').addEventListener('keyup', renderizarTabla);
 
         // ==========================================
         // 4. ESCRITURA EN EL MAPA DE STOCK (MOVIMIENTOS)
